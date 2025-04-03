@@ -16,6 +16,7 @@ WORKDIR /app
 
 # Expose Streamlit port
 EXPOSE 8501
+EXPOSE 8080
 
 # Run Streamlit
 CMD ["streamlit", "run", "frontEnd.py"]
