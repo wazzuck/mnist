@@ -1,23 +1,17 @@
 version: '3.8'
 
 services:
-  web:
-    build: .
+  postgres:
+    image: postgres:latest
+    environment:
+      POSTGRES_DB: mnist
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
     ports:
-      - "8501:8501"
-    depends_on:
-      - db
-    environment:
-      - DATABASE_URL=postgresql://postgres:postgres@db:5432/postgres
-
-  db:
-    image: postgres:13
-    environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=mnist
+      - "5432:5432"
     volumes:
-      - postgres_data:pg
+      - postgres_data:dg
+    restart: unless-stopped
 
 volumes:
   postgres_data:
