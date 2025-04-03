@@ -21,9 +21,6 @@ EXPOSE 8080
 # Use the official PostgreSQL image
 FROM postgres:latest
 
-# Copy initialization scripts (optional)
-COPY init-db.sh /docker-entrypoint-initdb.d/
-
 # Expose PostgreSQL port
 EXPOSE 5432
 
