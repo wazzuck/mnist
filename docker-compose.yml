@@ -10,8 +10,20 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:dg
+      - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
+
+  streamlit:
+    build: .
+    ports:
+      - "8501:8501"
+    depends_on:
+      - postgres
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_DB=mnist
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
 
 volumes:
   postgres_data:

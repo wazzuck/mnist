@@ -16,16 +16,6 @@ WORKDIR /app
 
 # Expose Streamlit port
 EXPOSE 8501
-EXPOSE 8080
-
-# Use the official PostgreSQL image
-FROM postgres:latest
-
-# Expose PostgreSQL port
-EXPOSE 5432
-
-# Run Postgres
-RUN postgres -D pg &
 
 # Run Streamlit
 CMD ["streamlit", "run", "frontEnd.py"]
