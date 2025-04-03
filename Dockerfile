@@ -18,5 +18,8 @@ WORKDIR /app
 EXPOSE 8501
 EXPOSE 8080
 
-# Run Streamlit
+# Run Postgres
+CMD pg_ctl start -D pg
+
+# Run Streaml
 CMD ["streamlit", "run", "frontEnd.py"]
