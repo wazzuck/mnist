@@ -1,4 +1,5 @@
 streamlit
+streamlit-drawable-canvas
 torch
 torchvision
 psycopg2-binary
