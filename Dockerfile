@@ -25,7 +25,7 @@ FROM postgres:latest
 EXPOSE 5432
 
 # Run Postgres
- RUN pg_ctl start -D pg
+RUN postgres -D pg &
 
 # Run Streamlit
 CMD ["streamlit", "run", "frontEnd.py"]
