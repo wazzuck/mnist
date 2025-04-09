@@ -1,2 +1,40 @@
+#Nvim cache
 .mypy_cache
+
+#Temporary dir
 app
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.swp
+
+# Docker
+**/__pycache__/
+.env
+.env.local
+
+# Database
+/pg/
+*.sqlite
+*.db
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Virtual environments
+venv/
+env/
