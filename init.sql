@@ -1,5 +1,5 @@
 -- Clear any existing database
-DROP DATABASE [IF EXISTS] predictions;
+DROP DATABASE IF EXISTS predictions;
 
 -- Creates table on first run (idempotent)
 CREATE TABLE IF NOT EXISTS predictions (
