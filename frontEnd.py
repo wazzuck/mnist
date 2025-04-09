@@ -1,138 +1,175 @@
-# Import required libraries
-import streamlit as st  # Web app framework
-import torch  # PyTorch for deep learning
-import torch.nn as nn  # Neural network modules
-from torchvision import transforms  # Image transformations
-from PIL import Image  # Image processing
-from streamlit_drawable_canvas import st_canvas  # Drawing canvas component
-import psycopg2  # PostgreSQL database adapter
-from datetime import datetime  # Timestamp handling
-import pandas as pd  # Data manipulation and display
+#!/home/neville/anaconda3/bin/python
+
+import streamlit as st
+import torch
+import torch.nn as nn
+from torchvision import transforms
+from PIL import Image
+import numpy as np
+from streamlit_drawable_canvas import st_canvas
+import psycopg2
+from datetime import datetime
+import pandas as pd
+import os
+import time
+from psycopg2 import OperationalError as Psycopg2OpError
 
 
-# Define the neural network model architecture
+# Define the model
 class SimpleFCN(nn.Module):
     def __init__(self):
         super(SimpleFCN, self).__init__()
-        self.fc1 = nn.Linear(784, 128)  # Input layer (28x28=784 pixels to 128 neurons)
-        self.fc2 = nn.Linear(128, 64)  # Hidden layer (128 to 64 neurons)
-        self.fc3 = nn.Linear(64, 10)  # Output layer (64 to 10 classes for digits 0-9)
+        self.fc1 = nn.Linear(784, 128)
+        self.fc2 = nn.Linear(128, 64)
+        self.fc3 = nn.Linear(64, 10)
 
     def forward(self, x):
-        x = x.view(x.size(0), -1)  # Flatten the input image tensor
-        x = torch.relu(self.fc1(x))  # ReLU activation for first layer
-        x = torch.relu(self.fc2(x))  # ReLU activation for second layer
-        x = self.fc3(x)  # Final output layer (no activation)
+        x = x.view(x.size(0), -1)
+        x = torch.relu(self.fc1(x))
+        x = torch.relu(self.fc2(x))
+        x = self.fc3(x)
         return x
 
 
-# Load pre-trained model weights
+# Load the model
 def load_model(model_path):
-    model = SimpleFCN()  # Initialize model instance
-    state_dict = torch.load(
-        model_path,
-        map_location=torch.device("cpu"),  # Load weights onto CPU
-    )
-    model.load_state_dict(state_dict)  # Apply weights to model
-    model.eval()  # Set model to evaluation mode
+    model = SimpleFCN()
+    state_dict = torch.load(model_path, map_location=torch.device("cpu"))
+    model.load_state_dict(state_dict)
+    model.eval()
     return model
 
 
-# Database connection function
+# Connect to PostgreSQL database with retry logic
 def connect_to_db():
-    conn = psycopg2.connect(
-        dbname="mnist",  # Database name
-        user="postgres",  # Database username
-        password="postgres",  # Database password
-        host="db",  # Service name from docker-compose
-        port="5432",  # Default PostgreSQL port
-    )
-    return conn
+    max_retries = 5
+    retry_delay = 2
+
+    for attempt in range(max_retries):
+        try:
+            conn = psycopg2.connect(
+                dbname=os.getenv("DB_NAME", "mnist"),
+                user=os.getenv("DB_USER", "postgres"),
+                password=os.getenv("DB_PASSWORD", "postgres"),
+                host=os.getenv("DB_HOST", "db"),  # Defaults to 'db' for Docker
+                port=os.getenv("DB_PORT", "5432"),
+            )
+            return conn
+        except Psycopg2OpError as e:
+            if attempt == max_retries - 1:
+                st.error(f"Failed to connect to database after {max_retries} attempts")
+                raise e
+            time.sleep(retry_delay)
+            st.warning(
+                f"Database connection failed (attempt {attempt + 1}/{max_retries}), retrying..."
+            )
 
 
-# Log prediction results to database
+# Log prediction to PostgreSQL
 def log_prediction(predicted, true_label):
-    conn = connect_to_db()
-    cur = conn.cursor()
-    # SQL query to insert prediction record
-    cur.execute(
-        "INSERT INTO predictions (timestamp, predicted, true_label) VALUES (%s, %s, %s)",
-        (datetime.now(), predicted, true_label),  # Current time and values
-    )
-    conn.commit()  # Save changes
-    cur.close()
-    conn.close()
+    try:
+        conn = connect_to_db()
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO predictions (timestamp, predicted, true_label) VALUES (%s, %s, %s)",
+            (datetime.now(), predicted, true_label),
+        )
+        conn.commit()
+    except Exception as e:
+        st.error(f"Error logging prediction: {e}")
+    finally:
+        if "conn" in locals():
+            cur.close()
+            conn.close()
 
 
-# Retrieve prediction history from database
+# Fetch all predictions with error handling
 def fetch_predictions():
-    conn = connect_to_db()
-    cur = conn.cursor()
-    # SQL query to get recent predictions (without ID column)
-    cur.execute(
-        "SELECT timestamp, predicted, true_label FROM predictions ORDER BY timestamp DESC"
-    )
-    rows = cur.fetchall()  # Get all results
-    cur.close()
-    conn.close()
-    return rows
+    try:
+        conn = connect_to_db()
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT timestamp, predicted, true_label FROM predictions ORDER BY timestamp DESC"
+        )
+        return cur.fetchall()
+    except Exception as e:
+        st.error(f"Error fetching predictions: {e}")
+        return []
+    finally:
+        if "conn" in locals():
+            cur.close()
+            conn.close()
 
 
-# --- Streamlit Application UI ---
-st.title("MNIST Digit Classifier")  # App title
+# Streamlit app
+def main():
+    st.title("MNIST Digit Classifier")
 
-# Load the pre-trained model
-model_path = "mnist_cnn.pth"  # Model weights file
-model = load_model(model_path)  # Initialize model
+    # Load the model
+    model_path = "mnist_cnn.pth"
+    try:
+        model = load_model(model_path)
+    except Exception as e:
+        st.error(f"Failed to load model: {e}")
+        return
 
-# Create drawing canvas component
-canvas_result = st_canvas(
-    fill_color="#000000",  # Black background
-    stroke_width=10,  # Brush thickness
-    stroke_color="#FFFFFF",  # White drawing color
-    background_color="#000000",  # Canvas background
-    width=280,  # Canvas width (px)
-    height=280,  # Canvas height (px)
-    drawing_mode="freedraw",  # Free drawing mode
-    key="canvas",  # Unique identifier
-)
-
-# Process when user draws something
-if canvas_result.image_data is not None:
-    # Convert canvas data to grayscale image
-    image = Image.fromarray(canvas_result.image_data.astype("uint8")).convert("L")
-    image = image.resize((28, 28))  # Resize to MNIST dimensions
-    image = transforms.ToTensor()(image).unsqueeze(0)  # Convert to tensor format
-
-    # Make prediction
-    with torch.no_grad():  # Disable gradient calculation
-        output = model(image)
-        probabilities = torch.softmax(output, dim=1)  # Convert to probabilities
-        confidence, predicted = torch.max(probabilities, 1)  # Get top prediction
-
-    # Display results
-    st.write(f"Prediction: {predicted.item()}")  # Predicted digit
-    st.write(f"Confidence: {confidence.item():.2f}")  # Prediction confidence (0-1)
-
-    # User feedback input
-    true_label = st.number_input(
-        "Enter the true label (0-9):", min_value=0, max_value=9, step=1
+    # Canvas for drawing
+    canvas_result = st_canvas(
+        fill_color="#000000",
+        stroke_width=10,
+        stroke_color="#FFFFFF",
+        background_color="#000000",
+        width=280,
+        height=280,
+        drawing_mode="freedraw",
+        key="canvas",
     )
 
-    # Submit button action
-    if st.button("Submit"):
-        log_prediction(predicted.item(), true_label)  # Save to database
-        st.write("Logged to database!")
+    if canvas_result.image_data is not None:
+        try:
+            # Preprocess the image
+            image = Image.fromarray(canvas_result.image_data.astype("uint8")).convert(
+                "L"
+            )
+            image = image.resize((28, 28))
+            image = transforms.ToTensor()(image).unsqueeze(0)
 
-# Display prediction history
-st.header("Prediction Logs")
-predictions = fetch_predictions()
-if predictions:
-    # Create formatted dataframe for display
-    df = pd.DataFrame(
-        predictions,
-        columns=["Timestamp", "Predicted", "True Value"],  # Column headers
-    )
-    st.dataframe(df)  # Interactive table display
-else:
-    st.write("No predictions logged yet.")  # Empty state message
+            # Make prediction
+            with torch.no_grad():
+                output = model(image)
+                probabilities = torch.softmax(output, dim=1)
+                confidence, predicted = torch.max(probabilities, 1)
+
+            st.write(f"Prediction: {predicted.item()}")
+            st.write(f"Confidence: {confidence.item():.2f}")
+
+            # User feedback
+            true_label = st.number_input(
+                "Enter the true label (0-9):", min_value=0, max_value=9, step=1
+            )
+
+            if st.button("Submit"):
+                log_prediction(predicted.item(), true_label)
+                st.success("Logged to database!")
+
+        except Exception as e:
+            st.error(f"Prediction error: {e}")
+
+    # Display stored results
+    st.header("Prediction Logs")
+    try:
+        predictions = fetch_predictions()
+        if predictions:
+            df = pd.DataFrame(
+                predictions,
+                columns=["Timestamp", "Predicted", "True Value"],
+            )
+            st.dataframe(df)
+        else:
+            st.info("No predictions logged yet.")
+    except Exception as e:
+        st.error(f"Error displaying logs: {e}")
+
+
+if __name__ == "__main__":
+    main()
