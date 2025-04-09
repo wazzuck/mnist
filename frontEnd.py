@@ -12,7 +12,30 @@ from datetime import datetime
 import pandas as pd
 import os
 import time
+import urllib.parse
 from psycopg2 import OperationalError as Psycopg2OpError
+
+
+# Database Configuration
+def get_db_config():
+    """Handle both Railway and local database configurations"""
+    if os.getenv("DATABASE_URL"):  # Railway environment
+        db_url = urllib.parse.urlparse(os.getenv("DATABASE_URL"))
+        return {
+            "host": db_url.hostname,
+            "dbname": db_url.path[1:],
+            "user": db_url.username,
+            "password": db_url.password,
+            "port": db_url.port,
+        }
+    else:  # Local development
+        return {
+            "host": os.getenv("DB_HOST", "db"),
+            "dbname": os.getenv("DB_NAME", "mnist"),
+            "user": os.getenv("DB_USER", "postgres"),
+            "password": os.getenv("DB_PASSWORD", "postgres"),
+            "port": os.getenv("DB_PORT", "5432"),
+        }
 
 
 # Define the model
@@ -40,80 +63,87 @@ def load_model(model_path):
     return model
 
 
-# Connect to PostgreSQL database with retry logic
+# Database connection with retry logic
 def connect_to_db():
     max_retries = 5
     retry_delay = 2
+    db_config = get_db_config()
 
     for attempt in range(max_retries):
         try:
             conn = psycopg2.connect(
-                dbname=os.getenv("DB_NAME", "mnist"),
-                user=os.getenv("DB_USER", "postgres"),
-                password=os.getenv("DB_PASSWORD", "postgres"),
-                host=os.getenv("DB_HOST", "db"),  # Defaults to 'db' for Docker
-                port=os.getenv("DB_PORT", "5432"),
+                host=db_config["host"],
+                dbname=db_config["dbname"],
+                user=db_config["user"],
+                password=db_config["password"],
+                port=db_config["port"],
             )
             return conn
         except Psycopg2OpError as e:
             if attempt == max_retries - 1:
-                st.error(f"Failed to connect to database after {max_retries} attempts")
-                raise e
+                st.error(
+                    """
+                Database connection failed. Please check:
+                1. Database service is running
+                2. Connection credentials are correct
+                3. Network access is configured
+                Error details: {}
+                """.format(str(e))
+                )
+                raise
             time.sleep(retry_delay)
-            st.warning(
-                f"Database connection failed (attempt {attempt + 1}/{max_retries}), retrying..."
-            )
+            st.warning(f"Retrying database connection ({attempt + 1}/{max_retries})...")
 
 
 # Log prediction to PostgreSQL
 def log_prediction(predicted, true_label):
     try:
         conn = connect_to_db()
-        cur = conn.cursor()
-        cur.execute(
-            "INSERT INTO predictions (timestamp, predicted, true_label) VALUES (%s, %s, %s)",
-            (datetime.now(), predicted, true_label),
-        )
-        conn.commit()
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO predictions (timestamp, predicted, true_label) VALUES (%s, %s, %s)",
+                (datetime.now(), predicted, true_label),
+            )
+            conn.commit()
     except Exception as e:
         st.error(f"Error logging prediction: {e}")
     finally:
-        if "conn" in locals():
-            cur.close()
+        if conn:
             conn.close()
 
 
-# Fetch all predictions with error handling
+# Fetch all predictions
 def fetch_predictions():
     try:
         conn = connect_to_db()
-        cur = conn.cursor()
-        cur.execute(
-            "SELECT timestamp, predicted, true_label FROM predictions ORDER BY timestamp DESC"
-        )
-        return cur.fetchall()
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT timestamp, predicted, true_label 
+                FROM predictions 
+                ORDER BY timestamp DESC
+                LIMIT 100
+            """)
+            return cur.fetchall()
     except Exception as e:
         st.error(f"Error fetching predictions: {e}")
         return []
     finally:
-        if "conn" in locals():
-            cur.close()
+        if conn:
             conn.close()
 
 
-# Streamlit app
+# Streamlit App
 def main():
     st.title("MNIST Digit Classifier")
 
-    # Load the model
-    model_path = "mnist_cnn.pth"
+    # Load model
     try:
-        model = load_model(model_path)
+        model = load_model("mnist_cnn.pth")
     except Exception as e:
-        st.error(f"Failed to load model: {e}")
-        return
+        st.error(f"Model loading failed: {e}")
+        st.stop()
 
-    # Canvas for drawing
+    # Drawing canvas
     canvas_result = st_canvas(
         fill_color="#000000",
         stroke_width=10,
@@ -125,50 +155,60 @@ def main():
         key="canvas",
     )
 
+    # Prediction logic
     if canvas_result.image_data is not None:
         try:
-            # Preprocess the image
             image = Image.fromarray(canvas_result.image_data.astype("uint8")).convert(
                 "L"
             )
             image = image.resize((28, 28))
             image = transforms.ToTensor()(image).unsqueeze(0)
 
-            # Make prediction
             with torch.no_grad():
                 output = model(image)
                 probabilities = torch.softmax(output, dim=1)
                 confidence, predicted = torch.max(probabilities, 1)
 
-            st.write(f"Prediction: {predicted.item()}")
-            st.write(f"Confidence: {confidence.item():.2f}")
+            st.success(
+                f"Prediction: {predicted.item()} (Confidence: {confidence.item():.2f})"
+            )
 
             # User feedback
             true_label = st.number_input(
                 "Enter the true label (0-9):", min_value=0, max_value=9, step=1
             )
 
-            if st.button("Submit"):
+            if st.button("Submit Prediction"):
                 log_prediction(predicted.item(), true_label)
-                st.success("Logged to database!")
+                st.rerun()  # Refresh the prediction log
 
         except Exception as e:
             st.error(f"Prediction error: {e}")
 
-    # Display stored results
-    st.header("Prediction Logs")
+    # Prediction history
+    st.header("Recent Predictions")
     try:
         predictions = fetch_predictions()
         if predictions:
             df = pd.DataFrame(
                 predictions,
-                columns=["Timestamp", "Predicted", "True Value"],
+                columns=["Timestamp", "Predicted", "True Label"],
             )
-            st.dataframe(df)
+            st.dataframe(
+                df,
+                column_config={
+                    "Timestamp": st.column_config.DatetimeColumn(
+                        "Timestamp",
+                        format="YYYY-MM-DD HH:mm:ss",
+                    )
+                },
+                hide_index=True,
+                use_container_width=True,
+            )
         else:
             st.info("No predictions logged yet.")
     except Exception as e:
-        st.error(f"Error displaying logs: {e}")
+        st.error(f"Error displaying history: {e}")
 
 
 if __name__ == "__main__":
