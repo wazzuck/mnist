@@ -1,4 +1,4 @@
-#!/home/neville/anaconda3/bin/python
+i  #!/home/neville/anaconda3/bin/python
 
 import streamlit as st
 import torch
@@ -20,9 +20,11 @@ from typing import Optional, List, Tuple
 # Database Configuration
 def get_db_config() -> dict:
     """Get database configuration from environment variables"""
-    if os.getenv("DATABASE_URL"):  # Railway environment
-        db_url = urllib.parse.urlparse(os.getenv("DATABASE_URL"))
-        return {
+    db_url = os.getenv("DATABASE_URL")
+    # st.write(f"DEBUG: DATABASE_URL = {db_url}")  # Uncomment for debugging
+    if db_url:  # Railway environment
+        db_url = urllib.parse.urlparse(db_url)
+        config = {
             "host": db_url.hostname,
             "dbname": db_url.path[1:],  # Remove leading slash
             "user": db_url.username,
@@ -30,8 +32,10 @@ def get_db_config() -> dict:
             "port": db_url.port,
             "sslmode": "require",
         }
+        # st.write(f"DEBUG: Config = {config}")  # Uncomment for debugging
+        return config
     else:  # Local development fallback
-        return {
+        config = {
             "host": os.getenv("DB_HOST", "localhost"),
             "dbname": os.getenv("DB_NAME", "mnist"),
             "user": os.getenv("DB_USER", "postgres"),
@@ -39,6 +43,8 @@ def get_db_config() -> dict:
             "port": os.getenv("DB_PORT", "5432"),
             "sslmode": "disable",
         }
+        # st.write(f"DEBUG: Fallback Config = {config}")  # Uncomment for debugging
+        return config
 
 
 # Neural Network Model
@@ -68,7 +74,7 @@ def load_model(model_path: str) -> SimpleFCN:
 
 # Database Connection
 def connect_to_db() -> Optional[psycopg2.extensions.connection]:
-    """Establish database connection with retry logic"""
+    """Establish database connection with retry logic and create table if needed"""
     max_retries = 3
     retry_delay = 1
     db_config = get_db_config()
@@ -83,6 +89,18 @@ def connect_to_db() -> Optional[psycopg2.extensions.connection]:
                 port=db_config["port"],
                 sslmode=db_config["sslmode"],
             )
+            # Create table if it doesn’t exist
+            with conn.cursor() as cur:
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS predictions (
+                        id SERIAL PRIMARY KEY,
+                        timestamp TIMESTAMP NOT NULL DEFAULT NOW(),
+                        predicted INTEGER NOT NULL,
+                        true_label INTEGER
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_timestamp ON predictions(timestamp);
+                """)
+                conn.commit()
             return conn
         except Psycopg2OpError as e:
             if attempt == max_retries - 1:
