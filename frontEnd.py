@@ -1,4 +1,4 @@
-i  #!/home/neville/anaconda3/bin/python
+#!/home/neville/anaconda3/bin/python
 
 import streamlit as st
 import torch
@@ -91,7 +91,8 @@ def connect_to_db() -> Optional[psycopg2.extensions.connection]:
             )
             # Create table if it doesn’t exist
             with conn.cursor() as cur:
-                cur.execute("""
+                cur.execute(
+                    """
                     CREATE TABLE IF NOT EXISTS predictions (
                         id SERIAL PRIMARY KEY,
                         timestamp TIMESTAMP NOT NULL DEFAULT NOW(),
@@ -99,7 +100,8 @@ def connect_to_db() -> Optional[psycopg2.extensions.connection]:
                         true_label INTEGER
                     );
                     CREATE INDEX IF NOT EXISTS idx_timestamp ON predictions(timestamp);
-                """)
+                """
+                )
                 conn.commit()
             return conn
         except Psycopg2OpError as e:
@@ -143,12 +145,14 @@ def fetch_predictions() -> List[Tuple[datetime, int, int]]:
             return []
 
         with conn.cursor() as cur:
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT timestamp, predicted, true_label 
                 FROM predictions 
                 ORDER BY timestamp DESC
                 LIMIT 100
-            """)
+            """
+            )
             return cur.fetchall()
     except Exception as e:
         st.error(f"Error fetching predictions: {str(e)}")
