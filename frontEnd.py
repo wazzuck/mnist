@@ -30,7 +30,7 @@ def get_db_config() -> dict:
             "port": db_url.port,
             "sslmode": "require",
         }
-    else:  # Local development
+    else:  # Local development fallback
         return {
             "host": os.getenv("DB_HOST", "localhost"),
             "dbname": os.getenv("DB_NAME", "mnist"),
